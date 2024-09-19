@@ -68,4 +68,76 @@ As discussed in Question 2, the memory bandwidth usaged reduces to $0.03125 \tim
 ## Question 6
 **Assume that a CUDA kernel is launched with 1000 thread blocks, each of which has 512 threads. If a variable is declared as a local variable in the kernel, how many versions of the variable will be created through the lifetime of the execution of the kernel?**
 
-There are $1000 \times $
+There are $1000 \times 512$ versions of this variable being created, because the scope of local variable is thread.
+
+## Question 7
+**In the previous question, if a variable is declared as a shared memory variable, how many versions of the variable will be created through the lifetime of the execution of the kernel?**
+
+There are $1000$ versions of this varible being created, because the scope of shared memory variable is block.
+
+## Question 8
+**Consider performing a matrix multiplication of two input matrices with dimensions $N \times N$. How many times is each element in the input matrices requested from global memory when:**
+
+**a. There is no tiling?** Let the computation be $C=A\times B$. The element $A_{i,j}$ is involved in computing the $i$-th row of $C$, so it is loaded $N$ times. Similar to $B$, each element of $B$ is loaded $N$ times by computing one column of $C$. Thus, each element in input matrices is requsted from global memory $N$ times.
+
+**b. Tiles of size $T\times T$ are used?** We only consider $A$. The element $A_{i,j}$ is for computing the $i$-th row of $C$. With tiled $C$, $A_{i,j}$ is only loaded once within a tile, thus $A_{i,j}$ is loaded $\frac{N}{T}$ times.
+
+## Questino 9
+**A kernel performs 36 floating-point operations and seven 32-bit global memory accesses per thread. For each of the following device properties, indicate whether this kernel is compute-bound or memory-bound.**
+
+The arithmetic intensity is $\frac{36\ FLOPs/s}{7\times 4\ Bytes}=\frac{9}{7}\ FLOPs/Bytes$.
+
+**a. Peak FLOPS=200 GFLOPS, peak memory bandwidth=100 GB/second**
+$\frac{9}{7}\times 100\times 10^{9}\approx128.6 \times 10^9 < 200 \times 10^9$. Thus, it is memory bound.
+
+**b. Peak FLOPS=300 GFLOPS, peak memory bandwidth=250 GB/second**
+$\frac{9}{7}\times 250\times 10^9 \approx 321.4\times 10^9 > 300\times 10^9$. Thus, it is compute-bound.
+
+## Question 10
+**To manipulate tiles, a new CUDA programmer has written a device kernel that will transpose each tile in a matrix. The tiles are of size `BLOCK_WIDTH` by `BLOCK_WIDTH`, and each of the dimensions of matrix A is known to be a multiple of `BLOCK_WIDTH`. The kernel invocation and code are shown below. `BLOCK_WIDTH` is known at compile time and could be set anywhere from 1 to 20.**
+
+```c
+dim3 blockDim(BLOCK_WIDTH, BLOCK_WIDTH);
+dim3 gridDim(A_width/blockDim.x, A_height/blockDim.y);
+BlockTranspose<<<gridDim, blockDim>>> (A, A_width, A_height);
+
+__global__
+void BlockTranspose (float* A_elements, int A_width, int A_height)
+{
+    __shared__ float blockA[BLOCK_WIDTH][BLOCK_WIDTH];
+
+    int baseIdx = blockIdx.x * BLOCK_SIZE + threadIdx.x;
+    baseIdx += (blockIdx.y * BLOCK_SIZE + threadIdx.y) * A_width;
+
+    blockA[threadIdx.y][threadIdx.x] = A_elements[baseIdx];
+    A_elements[baseIdx] = blockA[threadIdx.x][threadIdx.y];
+}
+```
+
+**a. Out of the possible range of values for BLOCK_SIZE, for what values of BLOCK_SIZE will this kernel function execute correctly on the device?** 
+
+`BLOCK_SIZE` should be at most $32$. The code misses synchronization after loading element to the shared memory. The last write may write trash value from `blockA` to the `A_elements`.
+
+**b. If the code does not execute correctly for all `BLOCK_SIZE` values, what is the root cause of this incorrect execution behavior? Suggest a fix to the code to make it work for all `BLOCK_SIZE` values.**
+
+The root cause is mentioned above. We can simply add a block synchronization after writing to `blockA`. Another optimization trick is that we do not need shared memory, a variable in register is enough.
+```C
+__global__
+void BlockTranspose (float* A_elements, int A_width, int A_height)
+{
+    __shared__ float blockA[BLOCK_WIDTH][BLOCK_WIDTH];
+
+    int col = blockIdx.x * BLOCK_SIZE + threadIdx.x;
+    int row = blockIdx.y * BLOCK_SIZE + threadIdx.y;
+
+    int baseIdx = row * A_width + col;
+    int transIdx = col * A_width + row; 
+
+    int transVal = A_elements[transIdx];
+    __syncthreads();
+    A_elements[baseIdx] = transVal;
+}
+```
+
+## Question 11
+Consider the following CUDA kernel and the corresponding host function that calls it:
