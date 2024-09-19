@@ -141,3 +141,49 @@ void BlockTranspose (float* A_elements, int A_width, int A_height)
 
 ## Question 11
 Consider the following CUDA kernel and the corresponding host function that calls it:
+```C
+__global__ void foo_kernel(float* a, float* b) {
+    unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+    float x[4];
+    __shared__ float y_s;
+    __shared__ float b_s[128];
+    for (unsigned int j = 0; j < 4; ++j) {
+        x[j] = a[j * blockDim.x * gridDim.x + 1];
+    }
+    if (threadIdx.x == 0) {
+        y_s = 7.4f;
+    }
+    b_s[threadIdx.x] = b[i];
+    __syncthreads();
+    b[i] = 2.5f * x[0] + 3.7f * x[1] + 6.3f * x[2] + 8.5f * x[3]
+        + y_s * b_s[threadIdx.x] + b_s[(threadIdx.x + 3) % 128];
+}
+
+void foo (int* a_d, int* b_d) {
+    unsigned int N = 1024;
+    foo_kernel <<(N + 128 - 1) / 128, 128>>> (a_d, b_d);
+}
+```
+
+**a. How many versions of the variable i are there?** $1024$
+
+**b. How many versions of the array x[] are there?** $1024$
+
+**c. How many versions of the variable y_s are there?** $\frac{1024}{128}=8$ 
+
+**d. How many versions of the array b_s[] are there?** $\frac{1024}{128}=8$ 
+
+**e. What is the amount of shared memory used per block (in bytes)?** `y_s` is $4$ bytes and $b_s$ is $128 \times 4=512$ bytes. Thus, each bock uses $4+512=518$ bytes of shared memory.
+
+**f. What is the floating-point to global memory access ratio of the kernel (in OP/B)?**
+
+There are $6$ global memory accesses ($1$ write, $5$ reads), and $10$ floating point opeartions. Thus, the ration is $\frac{10}{6\times 4}\approx0.42$ OP/B.
+
+**12. Consider a GPU with the following hardware limits: 2048 threads/SM, 32 blocks/SM, 64K (65,536) registers/SM, and 96 KB of shared memory/SM. For each of the following kernel characteristics, specify whether the kernel can achieve full occupancy. If not, specify the limiting factor.**
+
+**a. The kernel uses 64 threads/block, 27 registers/thread, and 4 KB of shared memory/SM.**
+We need $\frac{2048}{64}=32$ blocks. 
+The limiting factor is shared memory because $32 \times 4=128 > 96$.
+
+**b. The kernel uses 256 threads/block, 31 registers/thread, and 8 KB of shared memory/SM.**
+It can acheive the full occupancy. We need $\frac{2048}{256}=8$ blocks. The register is not a limit: $8 \times 256\times 31=63488 \le 65536$. The shared memory is not either a limit: $8\times 8=64 \le 96$.
